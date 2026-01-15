@@ -26,6 +26,24 @@
 // *                                                                            *
 // ******************************************************************************
 
+module AND2 (
+    A1,
+    A2,
+    ZN
+);
+  input A1;
+  input A2;
+  output ZN;
+
+  and (ZN, A1, A2);
+
+  specify
+    (A1 => ZN) = (0.1, 0.1);
+    (A2 => ZN) = (0.1, 0.1);
+  endspecify
+
+endmodule
+
 module AND2_X1 (
     A1,
     A2,
@@ -896,6 +914,21 @@ module AOI22_X4 (
     if ((A1 == 1'b0) && (A2 == 1'b0) && (B1 == 1'b1)) (B2 => ZN) = (0.1, 0.1);
     if ((A1 == 1'b0) && (A2 == 1'b1) && (B1 == 1'b1)) (B2 => ZN) = (0.1, 0.1);
     if ((A1 == 1'b1) && (A2 == 1'b0) && (B1 == 1'b1)) (B2 => ZN) = (0.1, 0.1);
+  endspecify
+
+endmodule
+
+module INV (
+    A,
+    ZN
+);
+  input A;
+  output ZN;
+
+  not (ZN, A);
+
+  specify
+    (A => ZN) = (0.1, 0.1);
   endspecify
 
 endmodule
