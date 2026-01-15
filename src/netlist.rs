@@ -234,9 +234,13 @@ pub struct PrimitiveCell {
 
 impl PrimitiveCell {
     /// Create a new primitive cell
-    pub fn new(ptype: PrimitiveType) -> Self {
+    pub fn new(ptype: PrimitiveType, size: Option<usize>) -> Self {
         Self {
-            name: Identifier::new(ptype.to_string()),
+            name: if let Some(s) = size {
+                format_id!("{}_X{}", ptype, s)
+            } else {
+                format_id!("{}", ptype)
+            },
             ptype,
             inputs: ptype
                 .get_input_list()
@@ -280,8 +284,8 @@ impl Instantiable for PrimitiveCell {
 
     fn from_constant(val: Logic) -> Option<Self> {
         match val {
-            Logic::False => Some(PrimitiveCell::new(PrimitiveType::GND)),
-            Logic::True => Some(PrimitiveCell::new(PrimitiveType::VCC)),
+            Logic::False => Some(PrimitiveCell::new(PrimitiveType::GND, None)),
+            Logic::True => Some(PrimitiveCell::new(PrimitiveType::VCC, None)),
             _ => None,
         }
     }
@@ -401,12 +405,12 @@ impl<I: Instantiable + LogicFunc<L>, L: CircuitLang + LogicCell<I>> LogicMapping
 impl LogicCell<PrimitiveCell> for CellLang {
     fn get_cell(&self) -> Option<PrimitiveCell> {
         match self {
-            CellLang::And(_) => Some(PrimitiveCell::new(PrimitiveType::AND)),
-            CellLang::Or(_) => Some(PrimitiveCell::new(PrimitiveType::OR)),
-            CellLang::Inv(_) => Some(PrimitiveCell::new(PrimitiveType::NOT)),
+            CellLang::And(_) => Some(PrimitiveCell::new(PrimitiveType::AND2, Some(1))),
+            CellLang::Or(_) => Some(PrimitiveCell::new(PrimitiveType::OR2, Some(1))),
+            CellLang::Inv(_) => Some(PrimitiveCell::new(PrimitiveType::INV, Some(1))),
             CellLang::Const(b) => PrimitiveCell::from_constant(Logic::from(*b)),
             CellLang::Cell(name, _) => match PrimitiveType::from_str(name.as_str()) {
-                Ok(ptype) => Some(PrimitiveCell::new(ptype)),
+                Ok(ptype) => Some(PrimitiveCell::new(ptype, Some(1))),
                 Err(_) => None,
             },
             _ => None,
@@ -417,21 +421,21 @@ impl LogicCell<PrimitiveCell> for CellLang {
 impl LogicCell<PrimitiveCell> for LutLang {
     fn get_cell(&self) -> Option<PrimitiveCell> {
         match self {
-            LutLang::And(_) => Some(PrimitiveCell::new(PrimitiveType::AND)),
-            LutLang::Mux(_) => Some(PrimitiveCell::new(PrimitiveType::MUX)),
-            LutLang::Nor(_) => Some(PrimitiveCell::new(PrimitiveType::NOR)),
-            LutLang::Not(_) => Some(PrimitiveCell::new(PrimitiveType::NOT)),
+            LutLang::And(_) => Some(PrimitiveCell::new(PrimitiveType::AND, None)),
+            LutLang::Mux(_) => Some(PrimitiveCell::new(PrimitiveType::MUX, None)),
+            LutLang::Nor(_) => Some(PrimitiveCell::new(PrimitiveType::NOR, None)),
+            LutLang::Not(_) => Some(PrimitiveCell::new(PrimitiveType::NOT, None)),
             LutLang::Const(b) => PrimitiveCell::from_constant(Logic::from(*b)),
             LutLang::DC => PrimitiveCell::from_constant(Logic::X),
-            LutLang::Reg(_) => Some(PrimitiveCell::new(PrimitiveType::FDRE)),
-            LutLang::Xor(_) => Some(PrimitiveCell::new(PrimitiveType::XOR)),
+            LutLang::Reg(_) => Some(PrimitiveCell::new(PrimitiveType::FDRE, None)),
+            LutLang::Xor(_) => Some(PrimitiveCell::new(PrimitiveType::XOR, None)),
             LutLang::Lut(l) => match l.len() {
-                2 => Some(PrimitiveCell::new(PrimitiveType::LUT1)),
-                3 => Some(PrimitiveCell::new(PrimitiveType::LUT2)),
-                4 => Some(PrimitiveCell::new(PrimitiveType::LUT3)),
-                5 => Some(PrimitiveCell::new(PrimitiveType::LUT4)),
-                6 => Some(PrimitiveCell::new(PrimitiveType::LUT5)),
-                7 => Some(PrimitiveCell::new(PrimitiveType::LUT6)),
+                2 => Some(PrimitiveCell::new(PrimitiveType::LUT1, None)),
+                3 => Some(PrimitiveCell::new(PrimitiveType::LUT2, None)),
+                4 => Some(PrimitiveCell::new(PrimitiveType::LUT3, None)),
+                5 => Some(PrimitiveCell::new(PrimitiveType::LUT4, None)),
+                6 => Some(PrimitiveCell::new(PrimitiveType::LUT5, None)),
+                7 => Some(PrimitiveCell::new(PrimitiveType::LUT6, None)),
                 _ => None,
             },
             _ => None,
@@ -442,7 +446,9 @@ impl LogicCell<PrimitiveCell> for LutLang {
 impl FromId for PrimitiveCell {
     fn from_id(s: &Identifier) -> Result<Self, Error> {
         match PrimitiveType::from_str(&s.to_string()) {
-            Ok(ptype) => Ok(PrimitiveCell::new(ptype)),
+            Ok(ptype) => Ok(PrimitiveCell::new(
+                ptype, None, /* Drop the size for logic synthesis */
+            )),
             Err(e) => Err(Error::ParseError(e)),
         }
     }
@@ -454,11 +460,11 @@ mod tests {
     use std::rc::Rc;
 
     fn and_gate() -> PrimitiveCell {
-        PrimitiveCell::new(PrimitiveType::AND)
+        PrimitiveCell::new(PrimitiveType::AND, None)
     }
 
     fn reg_cell() -> PrimitiveCell {
-        PrimitiveCell::new(PrimitiveType::FDRE)
+        PrimitiveCell::new(PrimitiveType::FDRE, None)
     }
 
     fn and_netlist() -> Rc<Netlist<PrimitiveCell>> {
