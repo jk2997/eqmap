@@ -214,6 +214,10 @@ impl CircuitLang for CellLang {
         matches!(self, Self::Bus(_))
     }
 
+    fn extract_program(&self) -> Option<u64> {
+        None
+    }
+
     fn get_var(&self) -> Option<Symbol> {
         match self {
             Self::Var(s) => Some(*s),

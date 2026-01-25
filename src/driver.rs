@@ -508,6 +508,9 @@ pub trait CircuitLang:
     /// Returns true is the node is a bus
     fn is_bus(&self) -> bool;
 
+    /// Returns the program value if the node is a LUT program; else, returns None
+    fn extract_program(&self) -> Option<u64>;
+
     /// Returns the symbol of the node, if is a variable
     fn get_var(&self) -> Option<Symbol>;
 }

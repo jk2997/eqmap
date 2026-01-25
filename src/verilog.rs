@@ -16,8 +16,9 @@ use egg::{Id, Language, RecExpr};
 use sv_parser::{Identifier, Locate, NodeEvent, RefNode, unwrap_node};
 
 use super::asic::CellLang;
-use super::logic::{Logic, dont_care};
+//use super::logic::{Logic, dont_care};
 use super::lut::{LutExprInfo, LutLang};
+use safety_net::Logic;
 
 /// A wrapper for parsing verilog at file `path` with content `s`
 pub fn sv_parse_wrapper(
@@ -273,7 +274,7 @@ impl PrimitiveType {
             Self::LUT5 => 5,
             Self::LUT6 => 6,
             Self::VCC | Self::GND => 0,
-            Self::FDRE => 1,
+            Self::FDRE => 4,
             Self::MAJ3 => 3,
         }
     }
@@ -291,7 +292,8 @@ impl PrimitiveType {
             | Self::XNOR2 => {
                 vec!["A".to_string(), "B".to_string()]
             }
-            Self::INV | Self::NOT => vec!["A".to_string()],
+            Self::NOT => vec!["A".to_string()],
+            Self::INV => vec!["I".to_string()],
             Self::AND2 | Self::NAND2 | Self::OR2 | Self::NOR2 => {
                 vec!["A1".to_string(), "A2".to_string()]
             }
@@ -368,7 +370,12 @@ impl PrimitiveType {
                 "I0".to_string(),
             ],
             Self::VCC | Self::GND => vec![],
-            Self::FDRE => vec!["D".to_string()],
+            Self::FDRE => vec![
+                "C".to_string(),
+                "CE".to_string(),
+                "D".to_string(),
+                "R".to_string(),
+            ],
         }
     }
 
@@ -389,6 +396,7 @@ impl PrimitiveType {
             | Self::LUT4
             | Self::LUT5
             | Self::LUT6
+            | Self::INV
             | Self::MUXF7
             | Self::MUXF8
             | Self::MUXF9 => "O".to_string(),
@@ -989,15 +997,15 @@ impl VerilogEmission for LutLang {
                 Ok(Some(prim))
             }
             LutLang::Const(b) => Ok(Some(SVPrimitive::new_const(
-                Logic::from(*b),
+                *b,
                 fresh_signal_name(),
                 fresh_prim_name(),
             ))),
-            LutLang::DC => Ok(Some(SVPrimitive::new_const(
-                dont_care(),
-                fresh_signal_name(),
-                fresh_prim_name(),
-            ))),
+            //            LutLang::DC => Ok(Some(SVPrimitive::new_const(
+            //                dont_care(),
+            //                fresh_signal_name(),
+            //                fresh_prim_name(),
+            //            ))),
             _ => Ok(None),
         }
     }
@@ -1070,7 +1078,10 @@ impl VerilogParsing for CellLang {
                 } else if primitive.is_assign() {
                     let val = primitive.attributes.get("VAL").unwrap();
                     if primitive.is_const() {
-                        let val = val.parse::<Logic>()?;
+                        let val = val
+                            .parse::<Logic>()
+                            .map_err(|e| format!("Parse error: {}", e))?;
+                        //   let val = val.parse::<Logic>()?;
                         if val.is_dont_care() {
                             Err("Cannot use dont care in CellLang".to_string())
                         } else {
@@ -1154,7 +1165,9 @@ impl VerilogParsing for LutLang {
                         PrimitiveType::INV | PrimitiveType::NOT => {
                             Ok(expr.add(LutLang::Not([ids[0]])))
                         }
-                        PrimitiveType::FDRE => Ok(expr.add(LutLang::Reg([ids[0]]))),
+                        PrimitiveType::FDRE => {
+                            Ok(expr.add(LutLang::Reg([ids[0], ids[1], ids[2], ids[3]])))
+                        }
                         PrimitiveType::LUT1
                         | PrimitiveType::LUT2
                         | PrimitiveType::LUT3
@@ -1177,11 +1190,14 @@ impl VerilogParsing for LutLang {
                 } else if primitive.is_assign() {
                     let val = primitive.attributes.get("VAL").unwrap();
                     if primitive.is_const() {
-                        let val = val.parse::<Logic>()?;
+                        let val = val
+                            .parse::<Logic>()
+                            .map_err(|e| format!("Parse error: {}", e))?;
+                        //     let val = val.parse::<Logic>()?;
                         if val.is_dont_care() {
-                            Ok(expr.add(LutLang::DC))
+                            Ok(expr.add(LutLang::Const(Logic::X)))
                         } else {
-                            Ok(expr.add(LutLang::Const(val.unwrap())))
+                            Ok(expr.add(LutLang::Const(val)))
                         }
                     } else {
                         Self::get_expr(val.as_str(), module, expr, map)
@@ -1742,7 +1758,6 @@ impl SVModule {
         };
 
         let mut programs: HashMap<Id, u64> = HashMap::new();
-
         for (id, node) in expr.as_ref().iter().enumerate() {
             let fresh_wire = || {
                 mapping.get(&id.into()).cloned().unwrap_or_else(|| {

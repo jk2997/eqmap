@@ -15,6 +15,7 @@ use egg::Language;
 use egg::RecExpr;
 use egg::Symbol;
 use egg::define_language;
+use safety_net::Logic;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 
@@ -22,9 +23,8 @@ define_language! {
     /// Definitions of e-node types. Programs are the only node type that is not a net/signal.
     #[allow(missing_docs)]
     pub enum LutLang {
-        Const(bool),
+        Const(Logic),
         Program(u64), // The only node type that is not a net
-        "x" = DC,
         Var(Symbol),
         "NOR" = Nor([Id; 2]),
         "MUX" = Mux([Id; 3]), // s, a, b
@@ -33,7 +33,7 @@ define_language! {
         "NOT" = Not([Id; 1]),
         "LUT" = Lut(Box<[Id]>), // Program is first
         "BUS" = Bus(Box<[Id]>), // a bus of nodes
-        "REG" = Reg([Id; 1]),
+        "REG" = Reg([Id; 4]), // ports C, CE, D, R
         "ARG" = Arg([Id; 1]),
         "CYCLE" = Cycle([Id; 1]),
     }
@@ -75,7 +75,6 @@ impl LutLang {
 
     fn verify_rec_cfg(&self, expr: &RecExpr<Self>, depth: u64) -> Result<(), String> {
         self.verify()?;
-
         match self {
             Self::Lut(l) => {
                 if let LutLang::Program(p) = expr[l[0]] {
@@ -204,13 +203,19 @@ impl LutLang {
         expr: &RecExpr<Self>,
     ) -> Result<BitVec, String> {
         match self {
-            LutLang::Const(b) => Ok(bitvec!(usize, Lsb0; *b as usize; 1)),
+            LutLang::Const(l) => match l {
+                Logic::True | Logic::False => {
+                    Ok(bitvec!(usize, Lsb0; l.clone().unwrap() as usize; 1))
+                }
+                _ => Err("X or Z detected".to_string()),
+            },
+            //    LutLang::Const(b) => Ok(bitvec!(usize, Lsb0; *b as usize; 1)),
             LutLang::Var(s) => match inputs.get(s.as_str()) {
                 Some(b) => Ok(bitvec!(usize, Lsb0; *b as usize; 1)),
                 None => Err(format!("Input {} is not driven", s.as_str())),
             },
+            //    LutLang::DC => Err("DC".to_string()),
             LutLang::Program(_) => panic!("Program node should not be evaluated"),
-            LutLang::DC => Err("DC".to_string()),
             LutLang::Nor(a) => {
                 let a0 = &a[0];
                 let a1 = &a[1];
@@ -367,7 +372,10 @@ impl LutLang {
     /// Returns the constant value of a [LutLang::Const] node
     fn get_as_constant(&self) -> Option<bool> {
         match self {
-            LutLang::Const(b) => Some(*b),
+            LutLang::Const(l) => match l {
+                Logic::True | Logic::False => Some(l.clone().unwrap()),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -386,14 +394,19 @@ impl LutLang {
 
         if k == 1 {
             let n = match program & 3 {
-                0 => LutLang::Const(false),
-                3 => LutLang::Const(true),
+                0 => LutLang::Const(Logic::False),
+                3 => LutLang::Const(Logic::True),
                 2 => {
                     return expr[l[1]].clone().fold_lut(expr, dest);
                 }
                 1 => {
-                    if let LutLang::Const(b) = expr[l[1]] {
-                        LutLang::Const(!b)
+                    if let LutLang::Const(b) = &expr[l[1]] {
+                        match b {
+                            Logic::True => LutLang::Const(Logic::False),
+                            Logic::False => LutLang::Const(Logic::True),
+                            _ => LutLang::Const(b.clone()),
+                        }
+                    //    LutLang::Const(!b)
                     } else {
                         return (self, false);
                     }
@@ -1140,6 +1153,13 @@ impl CircuitLang for LutLang {
 
     fn is_bus(&self) -> bool {
         matches!(self, Self::Bus(_))
+    }
+
+    fn extract_program(&self) -> Option<u64> {
+        match self {
+            Self::Program(val) => Some(*val),
+            _ => None,
+        }
     }
 
     fn get_var(&self) -> Option<Symbol> {

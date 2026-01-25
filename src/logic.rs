@@ -6,7 +6,7 @@
 
 use std::{fmt, str::FromStr};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// An enum to represent four-state logic
 pub enum Logic {
     /// Logical zero

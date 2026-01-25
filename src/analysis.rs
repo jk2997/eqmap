@@ -7,6 +7,8 @@
 
 use super::lut;
 use egg::{Analysis, DidMerge};
+#[cfg(feature = "egraph_fold")]
+use safety_net::Logic;
 #[cfg(feature = "cut_analysis")]
 use std::collections::HashSet;
 
@@ -142,7 +144,7 @@ impl Analysis<lut::LutLang> for LutAnalysis {
     ) -> Self::Data {
         match enode {
             lut::LutLang::Program(p) => LutAnalysisData::new(Some(*p), None, None, None),
-            lut::LutLang::Const(c) => LutAnalysisData::new(None, Some(*c), None, None),
+            lut::LutLang::Const(c) => LutAnalysisData::new(None, Some(c.unwrap()), None, None),
             lut::LutLang::Var(v) => {
                 let d = LutAnalysisData::new(None, None, Some(v.to_string()), None);
 
@@ -214,19 +216,23 @@ impl Analysis<lut::LutLang> for LutAnalysis {
                         let const_val = msb_const.unwrap();
                         match program & 3 {
                             0 => {
-                                let repl = egraph.add(lut::LutLang::Const(false));
+                                let repl = egraph.add(lut::LutLang::Const(Logic::False));
                                 egraph.union(id, repl);
                             }
                             3 => {
-                                let repl = egraph.add(lut::LutLang::Const(true));
+                                let repl = egraph.add(lut::LutLang::Const(Logic::True));
                                 egraph.union(id, repl);
                             }
                             2 => {
-                                let repl = egraph.add(lut::LutLang::Const(const_val));
+                                let repl =
+                                    egraph.add(lut::LutLang::Const(Logic::from_bool(const_val)));
                                 egraph.union(id, repl);
                             }
                             1 => {
-                                let repl = egraph.add(lut::LutLang::Const(!const_val));
+                                let repl = egraph.add(match const_val {
+                                    true => lut::LutLang::Const(Logic::False),
+                                    false => lut::LutLang::Const(Logic::True),
+                                });
                                 egraph.union(id, repl);
                             }
                             _ => unreachable!(),

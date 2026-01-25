@@ -14,9 +14,9 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 sv-parser = "0.13.4"
 ctrlc = "3.5.1"
-safety-net = "0.3.0"
+safety-net = { git = "https://github.com/jk2997/safety-net-matth2k", branch = "eqmap" }
 good_lp = { version = "1.14.2", optional = true }
-nl-compiler = { version = "0.1.0" }
+nl-compiler = { git = "https://github.com/jk2997/nl-compiler" }
 
 [lints.clippy]
 manual_range_contains = "allow"

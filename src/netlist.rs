@@ -8,6 +8,7 @@ use crate::asic::CellLang;
 use crate::driver::CircuitLang;
 use crate::lut::LutLang;
 use crate::verilog::PrimitiveType;
+use bitvec::prelude::*;
 use egg::{Id, RecExpr, Symbol};
 use nl_compiler::FromId;
 use safety_net::{
@@ -23,6 +24,12 @@ pub trait LogicFunc<L: CircuitLang> {
     /// Get the logic function/variant associated with the output at position `ind`.
     /// The children IDs are invalid/nulled in the returned [CircuitLang].
     fn get_logic_func(&self, ind: usize) -> Option<L>;
+}
+
+/// Helper trait for adding an LUT program node to a RecExpr<L>
+pub trait AddProgram<L: CircuitLang> {
+    /// Add a LUT program node to a RecExpr; returns None for CellLang
+    fn add_program(&self, recexpr: &mut RecExpr<L>, program_value: u64) -> Option<Id>;
 }
 
 /// Maps a circuit element to its expression, root, and leaf mappings
@@ -98,7 +105,7 @@ impl<L: CircuitLang, I: Instantiable + LogicFunc<L>> LogicMapping<L, I> {
 }
 
 /// Extracts the logic equation from a portion of a netlist.
-pub struct LogicMapper<'a, L: CircuitLang, I: Instantiable + LogicFunc<L>> {
+pub struct LogicMapper<'a, L: CircuitLang, I: Instantiable + LogicFunc<L> + AddProgram<L>> {
     _netlist: &'a Netlist<I>,
     mappings: Vec<LogicMapping<L, I>>,
 }
@@ -106,7 +113,7 @@ pub struct LogicMapper<'a, L: CircuitLang, I: Instantiable + LogicFunc<L>> {
 impl<'a, L, I> Analysis<'a, I> for LogicMapper<'a, L, I>
 where
     L: CircuitLang + 'a,
-    I: Instantiable + LogicFunc<L> + 'a,
+    I: Instantiable + LogicFunc<L> + AddProgram<L> + 'a,
 {
     fn build(netlist: &'a Netlist<I>) -> Result<Self, Error> {
         Ok(Self {
@@ -116,7 +123,7 @@ where
     }
 }
 
-impl<'a, L: CircuitLang, I: Instantiable + LogicFunc<L>> LogicMapper<'a, L, I> {
+impl<'a, L: CircuitLang, I: Instantiable + LogicFunc<L> + AddProgram<L>> LogicMapper<'a, L, I> {
     /// Add a mapping for a specific net
     pub fn insert(&mut self, nets: Vec<DrivenNet<I>>) -> Result<RecExpr<L>, String> {
         let mut expr = RecExpr::<L>::default();
@@ -173,14 +180,32 @@ impl<'a, L: CircuitLang, I: Instantiable + LogicFunc<L>> LogicMapper<'a, L, I> {
             } else if let Some(inst_type) = n.get_instance_type()
                 && let Some(mut logic) = inst_type.get_logic_func(n.get_output_index().unwrap())
             {
-                for (i, c) in n.clone().unwrap().inputs().enumerate() {
-                    let cid = c
-                        .get_driver()
-                        .ok_or(format!("Failed to get driver for input {} of net {}", i, n))?;
-                    let cid = mapping[&cid];
-                    logic.children_mut()[i] = cid;
+                let instant: &I = &*inst_type;
+                if let Some(init_param) = instant.get_parameter(&"INIT".into())
+                    && (!instant.is_seq())
+                {
+                    if let Parameter::BitVec(bv) = init_param {
+                        let program_value: u64 = bv.load_le();
+                        if let Some(program_id) = inst_type.add_program(&mut expr, program_value) {
+                            logic.children_mut()[0] = program_id;
+                        }
+                    }
+                    for (i, c) in n.clone().unwrap().inputs().enumerate() {
+                        let cid = c
+                            .get_driver()
+                            .ok_or(format!("Failed to get driver for input {} of net {}", i, n))?;
+                        let cid = mapping[&cid];
+                        logic.children_mut()[i + 1] = cid;
+                    }
+                } else {
+                    for (i, c) in n.clone().unwrap().inputs().enumerate() {
+                        let cid = c
+                            .get_driver()
+                            .ok_or(format!("Failed to get driver for input {} of net {}", i, n))?;
+                        let cid = mapping[&cid];
+                        logic.children_mut()[i] = cid;
+                    }
                 }
-
                 let id = expr.add(logic);
                 mapping.insert(n.clone(), id);
             } else {
@@ -203,7 +228,6 @@ impl<'a, L: CircuitLang, I: Instantiable + LogicFunc<L>> LogicMapper<'a, L, I> {
             leaves,
             leaves_by_id,
         });
-
         Ok(expr)
     }
 
@@ -279,7 +303,8 @@ impl Instantiable for PrimitiveCell {
     }
 
     fn parameters(&self) -> impl Iterator<Item = (Identifier, Parameter)> {
-        std::iter::empty()
+        self.params.clone().into_iter()
+        // std::iter::empty()
     }
 
     fn from_constant(val: Logic) -> Option<Self> {
@@ -324,18 +349,30 @@ impl LogicFunc<LutLang> for PrimitiveCell {
     fn get_logic_func(&self, _ind: usize) -> Option<LutLang> {
         match self.ptype {
             PrimitiveType::AND => Some(LutLang::And([0.into(); 2])),
-            PrimitiveType::VCC => Some(LutLang::Const(true)),
-            PrimitiveType::GND => Some(LutLang::Const(false)),
+            PrimitiveType::VCC => Some(LutLang::Const(Logic::True)),
+            PrimitiveType::GND => Some(LutLang::Const(Logic::False)),
             PrimitiveType::NOR => Some(LutLang::Nor([0.into(); 2])),
             PrimitiveType::XOR => Some(LutLang::Xor([0.into(); 2])),
             PrimitiveType::MUX => Some(LutLang::Mux([0.into(); 3])),
             PrimitiveType::NOT => Some(LutLang::Not([0.into()])),
-            PrimitiveType::FDRE => Some(LutLang::Reg([0.into()])),
+            PrimitiveType::FDRE => Some(LutLang::Reg([0.into(); 4])),
             _ if self.ptype.is_lut() => Some(LutLang::Lut(
                 vec![0.into(); self.ptype.get_num_inputs() + 1].into(),
             )),
             _ => None,
         }
+    }
+}
+
+impl AddProgram<LutLang> for PrimitiveCell {
+    fn add_program(&self, recexpr: &mut RecExpr<LutLang>, program_value: u64) -> Option<Id> {
+        Some(recexpr.add(LutLang::Program(program_value)))
+    }
+}
+
+impl AddProgram<CellLang> for PrimitiveCell {
+    fn add_program(&self, _recexpr: &mut RecExpr<CellLang>, _program_value: u64) -> Option<Id> {
+        None
     }
 }
 
@@ -349,20 +386,39 @@ impl<I: Instantiable + LogicFunc<L>, L: CircuitLang + LogicCell<I>> LogicMapping
     /// Rewrite the expression into the netlist
     pub fn rewrite(self, netlist: &Rc<Netlist<I>>) -> Result<Vec<DrivenNet<I>>, Error> {
         let mut mapping: HashMap<Id, DrivenNet<I>> = HashMap::new();
-
+        let mut lut_init: u64 = 0;
         for (i, n) in self.expr.iter().enumerate() {
             if let Some(var) = n.get_var() {
                 mapping.insert(i.into(), self.leaves[&var].clone());
+            } else if let Some(program_val) = n.extract_program() {
+                lut_init = program_val;
             } else if !n.is_bus() {
-                let cell = n.get_cell().ok_or(Error::ParseError(format!(
+                let mut cell = n.get_cell().ok_or(Error::ParseError(format!(
                     "Cannot reinsert node {} without associated cell",
                     n
                 )))?;
-                let operands = n
-                    .children()
-                    .iter()
-                    .map(|c| mapping[c].clone())
-                    .collect::<Vec<_>>();
+                let cell_name = cell.get_name().to_string();
+                let mut operands: Vec<DrivenNet<I>> = vec![];
+                if cell_name.contains("LUT") {
+                    let lut_k_char = cell_name.as_bytes()[3] as char;
+                    let lut_k = lut_k_char.to_digit(10).unwrap() as usize;
+                    cell.set_parameter(&"INIT".into(), Parameter::bitvec(1 << lut_k, lut_init));
+                    operands = n
+                        .children()
+                        .iter()
+                        .skip(1)
+                        .map(|c| mapping[c].clone())
+                        .collect::<Vec<_>>();
+                } else {
+                    if cell_name.contains("FDRE") {
+                        cell.set_parameter(&"INIT".into(), Parameter::Logic(Logic::X));
+                    }
+                    operands = n
+                        .children()
+                        .iter()
+                        .map(|c| mapping[c].clone())
+                        .collect::<Vec<_>>();
+                }
                 let inst_name = format_id!("reinst_{}", i);
                 let instance = netlist.insert_gate(cell, inst_name, &operands)?;
                 // TODO(matth2k): Support multi-output cells
@@ -391,7 +447,6 @@ impl<I: Instantiable + LogicFunc<L>, L: CircuitLang + LogicCell<I>> LogicMapping
 
             netlist.replace_net_uses(old, new)?;
         }
-
         netlist.clean()?;
 
         for (new, n) in new_roots.iter().zip(old_net_names.into_iter()) {
@@ -425,8 +480,8 @@ impl LogicCell<PrimitiveCell> for LutLang {
             LutLang::Mux(_) => Some(PrimitiveCell::new(PrimitiveType::MUX, None)),
             LutLang::Nor(_) => Some(PrimitiveCell::new(PrimitiveType::NOR, None)),
             LutLang::Not(_) => Some(PrimitiveCell::new(PrimitiveType::NOT, None)),
-            LutLang::Const(b) => PrimitiveCell::from_constant(Logic::from(*b)),
-            LutLang::DC => PrimitiveCell::from_constant(Logic::X),
+            LutLang::Const(b) => PrimitiveCell::from_constant(*b),
+            //       LutLang::DC => PrimitiveCell::from_constant(Logic::X),
             LutLang::Reg(_) => Some(PrimitiveCell::new(PrimitiveType::FDRE, None)),
             LutLang::Xor(_) => Some(PrimitiveCell::new(PrimitiveType::XOR, None)),
             LutLang::Lut(l) => match l.len() {

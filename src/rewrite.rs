@@ -65,21 +65,23 @@ where
 {
     let mut rules: Vec<Rewrite<lut::LutLang, A>> = Vec::new();
     // Logic element conversions
-    rules.append(&mut rewrite!("lut1-retime"; "(LUT ?p (REG ?a))" <=> "(REG (LUT ?p ?a))"));
     rules.append(
-        &mut rewrite!("lut2-retime"; "(LUT ?p (REG ?a) (REG ?b))" <=> "(REG (LUT ?p ?a ?b))"),
+        &mut rewrite!("lut1-retime"; "(LUT ?p (REG ?b ?c ?a ?d))" <=> "(REG ?b ?c (LUT ?p ?a) ?d)"),
     );
     rules.append(
-        &mut rewrite!("lut3-retime"; "(LUT ?p (REG ?a) (REG ?b) (REG ?c))" <=> "(REG (LUT ?p ?a ?b ?c))"),
+        &mut rewrite!("lut2-retime"; "(LUT ?p (REG ?c ?d ?a ?e) (REG ?c ?d ?b ?e))" <=> "(REG ?c ?d (LUT ?p ?a ?b) ?e)"),
     );
     rules.append(
-        &mut rewrite!("lut4-retime"; "(LUT ?p (REG ?a) (REG ?b) (REG ?c) (REG ?d))" <=> "(REG (LUT ?p ?a ?b ?c ?d))"),
+        &mut rewrite!("lut3-retime"; "(LUT ?p (REG ?d ?e ?a ?f) (REG ?d ?e ?b ?f) (REG ?d ?e ?c ?f))" <=> "(REG ?d ?e (LUT ?p ?a ?b ?c) ?f)"),
     );
     rules.append(
-        &mut rewrite!("lut5-retime"; "(LUT ?p (REG ?a) (REG ?b) (REG ?c) (REG ?d) (REG ?e))" <=> "(REG (LUT ?p ?a ?b ?c ?d ?e))"),
+        &mut rewrite!("lut4-retime"; "(LUT ?p (REG ?e ?f ?a ?g) (REG ?e ?f ?b ?g) (REG ?e ?f ?c ?g) (REG ?e ?f ?d ?g))" <=> "(REG ?e ?f (LUT ?p ?a ?b ?c ?d) ?g)"),
     );
     rules.append(
-        &mut rewrite!("lut6-retime"; "(LUT ?p (REG ?a) (REG ?b) (REG ?c) (REG ?d) (REG ?e) (REG ?f))" <=> "(REG (LUT ?p ?a ?b ?c ?d ?e ?f))"),
+        &mut rewrite!("lut5-retime"; "(LUT ?p (REG ?f ?g ?a ?h) (REG ?f ?g ?b ?h) (REG ?f ?g ?c ?h) (REG ?f ?g ?d ?h) (REG ?f ?g ?e ?h))" <=> "(REG ?f ?g (LUT ?p ?a ?b ?c ?d ?e) ?h)"),
+    );
+    rules.append(
+        &mut rewrite!("lut6-retime"; "(LUT ?p (REG ?g ?h ?a ?i) (REG ?g ?h ?b ?i) (REG ?g ?h ?c ?i) (REG ?g ?h ?d ?i) (REG ?g ?h ?e ?i) (REG ?g ?h ?f ?i))" <=> "(REG ?g ?h (LUT ?p ?a ?b ?c ?d ?e ?f) ?i)"),
     );
 
     rules
@@ -90,30 +92,30 @@ where
 pub fn permute_groups() -> Vec<Rewrite<lut::LutLang, LutAnalysis>> {
     let mut rules: Vec<Rewrite<lut::LutLang, LutAnalysis>> = Vec::new();
     // LUT permutation groups
-    rules.push(rewrite!("lut2-permute"; "(LUT ?p ?a ?b)" 
+    rules.push(rewrite!("lut2-permute"; "(LUT ?p ?a ?b)"
         => {PermuteInput::new(1, "?p".parse().unwrap(), vec!["?a".parse().unwrap(), "?b".parse().unwrap()])}));
 
     for i in 1..3 {
         let rname = format!("lut3-permute-{i}");
-        rules.push(rewrite!(rname; "(LUT ?p ?a ?b ?c)" 
+        rules.push(rewrite!(rname; "(LUT ?p ?a ?b ?c)"
         => {PermuteInput::new(i, "?p".parse().unwrap(), vec!["?a".parse().unwrap(), "?b".parse().unwrap(), "?c".parse().unwrap()])}));
     }
 
     for i in 1..4 {
         let rname = format!("lut4-permute-{i}");
-        rules.push(rewrite!(rname; "(LUT ?p ?a ?b ?c ?d)" 
+        rules.push(rewrite!(rname; "(LUT ?p ?a ?b ?c ?d)"
         => {PermuteInput::new(i, "?p".parse().unwrap(), vec!["?a".parse().unwrap(), "?b".parse().unwrap(), "?c".parse().unwrap(), "?d".parse().unwrap()])}));
     }
 
     for i in 1..5 {
         let rname = format!("lut5-permute-{i}");
-        rules.push(rewrite!(rname; "(LUT ?p ?a ?b ?c ?d ?e)" 
+        rules.push(rewrite!(rname; "(LUT ?p ?a ?b ?c ?d ?e)"
         => {PermuteInput::new(i, "?p".parse().unwrap(), vec!["?a".parse().unwrap(), "?b".parse().unwrap(), "?c".parse().unwrap(), "?d".parse().unwrap(), "?e".parse().unwrap()])}));
     }
 
     for i in 1..6 {
         let rname = format!("lut6-permute-{i}");
-        rules.push(rewrite!(rname; "(LUT ?p ?a ?b ?c ?d ?e ?f)" 
+        rules.push(rewrite!(rname; "(LUT ?p ?a ?b ?c ?d ?e ?f)"
         => {PermuteInput::new(i, "?p".parse().unwrap(), vec!["?a".parse().unwrap(), "?b".parse().unwrap(), "?c".parse().unwrap(), "?d".parse().unwrap(), "?e".parse().unwrap(), "?f".parse().unwrap()])}));
     }
 
@@ -736,7 +738,9 @@ pub mod decomp {
                     c.append(&mut inputs);
                     egraph.add(LutLang::Lut(c.into()))
                 }
-                AbstractNode::Const(b) => egraph.add(LutLang::Const(b)),
+                AbstractNode::Const(b) => {
+                    egraph.add(LutLang::Const(safety_net::Logic::from_bool(b)))
+                }
                 AbstractNode::Node(id) => id,
             }
         }

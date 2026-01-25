@@ -124,7 +124,7 @@ mod tests {
     fn test_analysis() {
         let const_val = true;
         let prog = 1337;
-        let const_true = LutLang::Const(const_val);
+        let const_true = LutLang::Const(safety_net::Logic::from_bool(const_val));
         let prog_node = LutLang::Program(prog);
         let mut egraph = egg::EGraph::default();
         let const_analysis = LutAnalysis::make(&mut egraph, &const_true, egg::Id::default());
@@ -700,7 +700,7 @@ endmodule\n"
 
     #[test]
     fn test_emit_reg() {
-        let reg: RecExpr<LutLang> = "(REG a)".parse().unwrap();
+        let reg: RecExpr<LutLang> = "(REG clk true a false)".parse().unwrap();
         let module = SVModule::from_luts(reg, "my_reg".to_string(), Vec::new());
         assert!(module.is_ok());
         let module = module.unwrap();
@@ -889,51 +889,64 @@ endmodule\n"
     #[test]
     fn test_reg() {
         // Make sure any expression that include reg return inconclusive equivalence
-        let simple_reg_expr: RecExpr<LutLang> = "(REG a)".parse().unwrap();
-        assert!(LutLang::func_equiv(&simple_reg_expr, &"(REG a)".parse().unwrap()).is_equiv());
+        let simple_reg_expr: RecExpr<LutLang> = "(REG clk true a rst)".parse().unwrap();
+        assert!(
+            LutLang::func_equiv(&simple_reg_expr, &"(REG clk true a rst)".parse().unwrap())
+                .is_equiv()
+        );
         assert!(
             LutLang::func_equiv(&simple_reg_expr, &"(AND a b)".parse().unwrap()).is_inconclusive()
         );
         assert!(
-            LutLang::func_equiv(&simple_reg_expr, &"(XOR c (REG d))".parse().unwrap())
-                .is_inconclusive()
+            LutLang::func_equiv(
+                &simple_reg_expr,
+                &"(XOR c (REG clk true d rst))".parse().unwrap()
+            )
+            .is_inconclusive()
         );
         let compicated_reg_expr: RecExpr<LutLang> =
-            "AND (AND a b) (XOR (AND c (REG a)) d)".parse().unwrap();
+            "AND (AND a b) (XOR (AND c (REG clk true a rst)) d)"
+                .parse()
+                .unwrap();
         assert!(LutLang::func_equiv(&compicated_reg_expr, &simple_reg_expr).is_inconclusive());
     }
 
     #[test]
     fn test_cycle() {
-        let simple_cycle_expr: RecExpr<LutLang> = "(CYCLE (REG (AND a (ARG 0))))".parse().unwrap();
+        let simple_cycle_expr: RecExpr<LutLang> = "(CYCLE (REG clk true (AND a (ARG 0)) rst))"
+            .parse()
+            .unwrap();
         assert!(
             LutLang::func_equiv(
                 &simple_cycle_expr,
-                &"(CYCLE (REG (AND a (ARG 0))))".parse().unwrap()
-            )
-            .is_equiv()
-        );
-        let complex_cycle_expr: RecExpr<LutLang> =
-            "(CYCLE (XOR (ARG 0) (CYCLE (REG (AND a (ARG 1))))))"
-                .parse()
-                .unwrap();
-        assert!(
-            LutLang::func_equiv(
-                &complex_cycle_expr,
-                &"(CYCLE (XOR (ARG 0) (CYCLE (REG (AND a (ARG 1))))))"
+                &"(CYCLE (REG clk true (AND a (ARG 0)) rst))"
                     .parse()
                     .unwrap()
             )
             .is_equiv()
         );
-        let eval_cycle_expr: RecExpr<LutLang> = "(CYCLE (REG in))".parse().unwrap();
+        let complex_cycle_expr: RecExpr<LutLang> =
+            "(CYCLE (XOR (ARG 0) (CYCLE (REG clk true (AND a (ARG 1)) rst))))"
+                .parse()
+                .unwrap();
         assert!(
-            LutLang::func_equiv(&eval_cycle_expr, &"(REG in)".parse().unwrap()).is_inconclusive()
+            LutLang::func_equiv(
+                &complex_cycle_expr,
+                &"(CYCLE (XOR (ARG 0) (CYCLE (REG clk true (AND a (ARG 1)) rst))))"
+                    .parse()
+                    .unwrap()
+            )
+            .is_equiv()
+        );
+        let eval_cycle_expr: RecExpr<LutLang> = "(CYCLE (REG clk true in rst))".parse().unwrap();
+        assert!(
+            LutLang::func_equiv(&eval_cycle_expr, &"(REG clk true in rst)".parse().unwrap())
+                .is_inconclusive()
         );
         assert!(
             LutLang::func_equiv(
                 &simple_cycle_expr,
-                &"(CYCLE (REG (AND (XOR (AND a 1) (ARG 0)) (ARG 0))))"
+                &"(CYCLE (REG clk true (AND (XOR (AND a 1) (ARG 0)) (ARG 0)) rst))"
                     .parse()
                     .unwrap()
             )
@@ -943,15 +956,21 @@ endmodule\n"
 
     #[test]
     fn test_cycle_verify() {
-        let bad_cycle: RecExpr<LutLang> = "(CYCLE (REG (AND a (ARG myarg))))".parse().unwrap();
+        let bad_cycle: RecExpr<LutLang> = "(CYCLE (REG clk true (AND a (ARG myarg)) rst))"
+            .parse()
+            .unwrap();
         let root = bad_cycle.as_ref().last().unwrap();
         assert!(root.verify_rec(&bad_cycle).is_err());
 
-        let good_cycle: RecExpr<LutLang> = "(CYCLE (REG (AND a (ARG 0))))".parse().unwrap();
+        let good_cycle: RecExpr<LutLang> = "(CYCLE (REG clk true (AND a (ARG 0)) rst))"
+            .parse()
+            .unwrap();
         let root = good_cycle.as_ref().last().unwrap();
         assert!(root.verify_rec(&good_cycle).is_ok());
 
-        let bad_cycle: RecExpr<LutLang> = "(CYCLE (REG (AND a (ARG 1))))".parse().unwrap();
+        let bad_cycle: RecExpr<LutLang> = "(CYCLE (REG clk true (AND a (ARG 1)) rst))"
+            .parse()
+            .unwrap();
         let root = bad_cycle.as_ref().last().unwrap();
         assert!(root.verify_rec(&bad_cycle).is_err());
     }
